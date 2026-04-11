@@ -52,6 +52,34 @@ report = orchestrator.run("data.csv")
 print(report.executive_summary)
 ```
 
+## 在线演示
+
+### 本地运行 Demo
+
+项目提供了一个基于 Streamlit 的交互式 Web Demo，支持文件上传、配置选择、实时进度展示和报告下载。
+
+```bash
+# 安装 Demo 依赖
+pip install -e ".[demo]"
+
+# 启动 Streamlit 应用
+streamlit run streamlit_app.py
+```
+
+启动后浏览器会自动打开 `http://localhost:8501`，即可在图形界面中体验完整的分析流程。
+
+### 部署到 Streamlit Cloud
+
+1. 将项目推送到 GitHub 仓库
+2. 登录 [Streamlit Cloud](https://streamlit.io/cloud)，创建新应用
+3. 关联 GitHub 仓库，设置以下配置：
+   - **Repository**: 选择项目仓库
+   - **Branch**: `main`
+   - **Main file path**: `streamlit_app.py`
+   - **Python version**: `3.11`
+4. 如需使用 LLM 功能，在应用的 **Secrets** 中添加 `OPENAI_API_KEY` 等环境变量
+5. 点击 **Deploy** 即可完成部署
+
 ## 架构说明
 
 Explainability Engine 采用状态机驱动的分层架构，核心组件包括：

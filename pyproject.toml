@@ -38,6 +38,9 @@ dev = [
     "ruff",
     "mypy",
 ]
+demo = [
+    "streamlit>=1.30.0",
+]
 
 [project.scripts]
 explain = "cli.main:cli"
