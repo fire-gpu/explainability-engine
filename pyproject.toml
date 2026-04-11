@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "explainability-engine"
+version = "0.1.0"
+description = "智能数据可解释性分析引擎 —— 将数据分析结果转化为人类可理解的叙述"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "Explainability Engine Team"},
+]
+dependencies = [
+    "pandas",
+    "numpy",
+    "scipy",
+    "scikit-learn",
+    "jinja2",
+    "pyyaml",
+    "openai",
+    "click",
+]
+
+[project.optional-dependencies]
+causal = [
+    "dowhy",
+    "causalnex",
+]
+viz = [
+    "matplotlib",
+    "seaborn",
+]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "ruff",
+    "mypy",
+]
+
+[project.scripts]
+explain = "cli.main:cli"
+
+[tool.setuptools.packages.find]
+include = [
+    "core*",
+    "analyzers*",
+    "llm*",
+    "rules*",
+    "report*",
+    "cli*",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true

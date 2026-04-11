@@ -1,0 +1,13 @@
+name: 通用分析
+description: 通用数据分析领域配置
+key_variables: []
+causal_templates: []
+explanation_focus:
+  - 变量重要性
+  - 相关性
+  - 异常值
+report_sections:
+  - 变量分析
+  - 相关性分析
+  - 因果推断
+  - 预测模拟

@@ -1,0 +1,26 @@
+name: 营销分析
+description: 营销效果分析领域配置
+key_variables:
+  - conversion_rate
+  - roi
+  - channel
+  - spend
+  - reach
+  - engagement
+causal_templates:
+  - from: spend
+    to: reach
+  - from: reach
+    to: conversion_rate
+  - from: engagement
+    to: conversion_rate
+explanation_focus:
+  - 转化率
+  - ROI
+  - 渠道效果
+  - 用户参与度
+report_sections:
+  - 渠道效果分析
+  - 转化漏斗
+  - ROI 分析
+  - 预算优化建议

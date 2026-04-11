@@ -1,0 +1,32 @@
+name: 定价策略
+description: 定价策略分析领域配置
+key_variables:
+  - price
+  - cost
+  - demand
+  - volume
+  - competitor_price
+  - margin
+causal_templates:
+  - from: cost
+    to: price
+    description: 成本影响定价
+  - from: price
+    to: demand
+    description: 价格影响需求
+  - from: competitor_price
+    to: price
+    description: 竞品价格影响定价
+  - from: demand
+    to: volume
+    description: 需求影响销量
+explanation_focus:
+  - 价格弹性
+  - 竞品因素
+  - 成本结构
+  - 利润率
+report_sections:
+  - 价格分析
+  - 竞品对比
+  - 需求弹性
+  - 利润模拟

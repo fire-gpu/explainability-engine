@@ -1,0 +1,26 @@
+name: 风险评估
+description: 风险评估分析领域配置
+key_variables:
+  - risk_score
+  - default_probability
+  - exposure
+  - loss_given_default
+  - credit_score
+  - volatility
+causal_templates:
+  - from: credit_score
+    to: default_probability
+  - from: volatility
+    to: risk_score
+  - from: exposure
+    to: risk_score
+explanation_focus:
+  - 风险因子
+  - 尾部风险
+  - 违约概率
+  - 风险敞口
+report_sections:
+  - 风险因子分析
+  - 违约概率评估
+  - 风险敞口分析
+  - 压力测试
