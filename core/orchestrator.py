@@ -4,6 +4,9 @@
 负责协调整个分析流程，按顺序调用解析、描述性分析、因果分析、
 预测模拟和报告生成等阶段，并通过状态机管理生命周期。
 支持断点续跑和异常处理。
+
+在解析完成后、描述性分析之前，可选地执行数据预扫描步骤，
+让 LLM 理解数据的业务语义，生成 BusinessUnderstanding。
 """
 
 from __future__ import annotations
@@ -30,6 +33,14 @@ class Orchestrator:
 
     协调各分析阶段的执行顺序，管理状态转换并记录日志。
     支持断点续跑：如果状态机已有中间结果，可从上次中断处继续。
+
+    分析流程：
+    1. 解析数据文件（PARSING 状态）
+    2. 数据预扫描（可选，作为 PARSING 的一部分，生成 BusinessUnderstanding）
+    3. 描述性分析（DESCRIPTIVE 状态）
+    4. 因果分析（可选，CAUSAL 状态）
+    5. 预测模拟（可选，PREDICTIVE 状态）
+    6. 报告生成（REPORTING 状态）
 
     Attributes:
         config: 分析配置
@@ -69,8 +80,8 @@ class Orchestrator:
     def run(self, file_path: str) -> ExplainabilityReport:
         """执行完整的分析流程
 
-        按照状态机定义的流程，依次执行解析、描述性分析、
-        因果分析（可选）、预测模拟（可选）和报告生成。
+        按照状态机定义的流程，依次执行解析、数据预扫描（可选）、
+        描述性分析、因果分析（可选）、预测模拟（可选）和报告生成。
         支持断点续跑：如果状态机已有中间结果，可从上次中断处继续。
 
         Args:
@@ -99,6 +110,11 @@ class Orchestrator:
                 self.state_machine.reset()
                 analysis_input = self._parse(file_path)
                 self._cached_input = analysis_input
+
+            # 阶段 1.5: 数据预扫描（解析完成后、描述性分析之前）
+            # 将扫描作为 parsing 阶段的一部分，不新增状态
+            if self.llm_client is not None:
+                analysis_input = self._scan_business_context(analysis_input)
 
             # 阶段 2: 描述性分析
             current_state = self.state_machine.current_state
@@ -184,6 +200,36 @@ class Orchestrator:
             except ValueError:
                 pass  # 如果当前状态无法转入 ERROR（如已在终态），忽略
             raise
+
+    def _scan_business_context(self, analysis_input: AnalysisInput) -> AnalysisInput:
+        """数据预扫描：让 LLM 理解数据业务语义
+
+        在解析完成后、描述性分析之前执行。使用 DataScanner
+        分析数据的列名、类型和统计特征，推断业务场景和关键指标，
+        生成 BusinessUnderstanding 对象并附加到 analysis_input 上。
+
+        如果预扫描失败（例如 LLM 不可用或超时），会静默跳过，
+        不影响后续分析流程。
+
+        Args:
+            analysis_input: 已解析的分析输入
+
+        Returns:
+            AnalysisInput: 附带了 business_understanding 的分析输入
+        """
+        try:
+            from llm.data_scanner import DataScanner
+
+            scanner = DataScanner(llm_client=self.llm_client)
+            understanding = scanner.scan(analysis_input)
+            analysis_input.business_understanding = understanding
+            logger.info("数据预扫描完成，业务场景: %s", understanding.inferred_scenario if understanding else "无")
+        except ImportError:
+            logger.debug("DataScanner 模块不可用，跳过数据预扫描")
+        except Exception as e:
+            logger.warning("数据预扫描失败，跳过: %s", e)
+
+        return analysis_input
 
     def _should_skip_causal(self, analysis_input: AnalysisInput) -> str | None:
         """使用规则引擎判断是否应跳过因果分析
@@ -421,10 +467,11 @@ class Orchestrator:
         """生成可解释性报告
 
         汇总所有分析结果，调用 ReportGenerator 生成自然语言叙述，
-        并组装最终报告。
+        并组装最终报告。business_understanding 会通过 input_data
+        自动传递给报告生成器。
 
         Args:
-            input_data: 分析输入
+            input_data: 分析输入（包含 business_understanding）
             desc_result: 描述性分析结果
             causal_result: 因果分析结果（可选）
             pred_result: 预测模拟结果（可选）

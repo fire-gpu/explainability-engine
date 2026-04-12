@@ -101,6 +101,7 @@ class CausalAnalyzer:
             counterfactuals=counterfactuals,
             domain=domain,
             audience=audience,
+            business_understanding=analysis_input.business_understanding,
         )
         logger.info("因果叙述生成完成")
 
@@ -537,6 +538,7 @@ class CausalAnalyzer:
         counterfactuals: list[Counterfactual],
         domain: str,
         audience: str,
+        business_understanding: object | None = None,
     ) -> str:
         """生成因果解释叙述
 
@@ -549,6 +551,7 @@ class CausalAnalyzer:
             counterfactuals: 反事实推理列表
             domain: 业务领域
             audience: 目标受众
+            business_understanding: L1 数据预扫描的业务理解结果（可选）
 
         Returns:
             str: 自然语言因果解释文本
@@ -568,6 +571,7 @@ class CausalAnalyzer:
                     causal_findings=causal_findings,
                     domain=domain or "通用",
                     audience=audience,
+                    business_understanding=business_understanding,  # type: ignore[arg-type]
                 )
                 narrative = self.llm.generate(
                     prompt=prompt,

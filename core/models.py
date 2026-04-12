@@ -67,6 +67,8 @@ class AnalysisConfig:
         target_variable: 目标变量名（可选）
         causal_enabled: 是否启用因果分析
         predictive_enabled: 是否启用预测模拟
+        business_question: 用户输入的关键业务问题
+        business_context: 用户描述的业务场景上下文
     """
 
     audience: str = "analyst"
@@ -74,6 +76,37 @@ class AnalysisConfig:
     target_variable: str | None = None
     causal_enabled: bool = True
     predictive_enabled: bool = True
+    business_question: str = ""
+    business_context: str = ""
+
+
+# ============================================================
+# 业务理解（L1 数据预扫描结果）
+# ============================================================
+
+
+@dataclass
+class BusinessUnderstanding:
+    """LLM 对数据的业务理解结果
+
+    通过 L1 数据预扫描阶段，让 LLM 先"阅读"数据并推断业务语义，
+    将理解结果注入后续分析流程，提升解释的业务相关性。
+
+    Attributes:
+        inferred_scenario: LLM 推断的业务场景描述
+        key_metrics: 识别出的关键业务指标列表
+        causal_hypotheses: LLM 生成的因果假设列表
+        data_characteristics: 数据特征描述
+        analysis_suggestions: 分析建议
+        business_question_answer: 对用户业务问题的初步回答
+    """
+
+    inferred_scenario: str = ""
+    key_metrics: list[str] = field(default_factory=list)
+    causal_hypotheses: list[str] = field(default_factory=list)
+    data_characteristics: str = ""
+    analysis_suggestions: list[str] = field(default_factory=list)
+    business_question_answer: str = ""
 
 
 # ============================================================
@@ -89,11 +122,13 @@ class AnalysisInput:
         data: 原始数据 DataFrame
         metadata: 数据集元信息
         config: 分析配置
+        business_understanding: L1 数据预扫描的业务理解结果（可选）
     """
 
     data: pd.DataFrame = field(default_factory=pd.DataFrame)
     metadata: DataMetadata = field(default_factory=DataMetadata)
     config: AnalysisConfig = field(default_factory=AnalysisConfig)
+    business_understanding: BusinessUnderstanding | None = None
 
 
 # ============================================================

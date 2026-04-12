@@ -70,6 +70,18 @@ if str(_PROJECT_ROOT) not in sys.path:
     is_flag=True,
     help="不使用 LLM（纯模板模式）",
 )
+@click.option(
+    "--question", "-q",
+    type=str,
+    default="",
+    help="关键业务问题（如：为什么利润在下降？）",
+)
+@click.option(
+    "--context",
+    type=str,
+    default="",
+    help="业务场景描述（如：B2B SaaS 定价分析）",
+)
 def cli(
     file: str,
     audience: str,
@@ -81,6 +93,8 @@ def cli(
     output: str | None,
     output_format: str,
     no_llm: bool,
+    question: str,
+    context: str,
 ) -> None:
     """Explainability Engine - AI 模型可解释性分析引擎
 
@@ -100,6 +114,8 @@ def cli(
         target_variable=target,
         causal_enabled=not no_causal,
         predictive_enabled=not no_predictive,
+        business_question=question,
+        business_context=context,
     )
 
     click.echo("=" * 60)
@@ -115,6 +131,10 @@ def cli(
     click.echo(f"预测模拟: {'启用' if config.predictive_enabled else '跳过'}")
     click.echo(f"输出格式: {output_format}")
     click.echo(f"LLM 模式: {'禁用（纯模板）' if no_llm else '启用'}")
+    if question:
+        click.echo(f"业务问题: {question}")
+    if context:
+        click.echo(f"业务场景: {context}")
     click.echo("-" * 60)
 
     # ============================================================

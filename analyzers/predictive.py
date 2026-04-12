@@ -113,6 +113,7 @@ class PredictiveSimulator:
             what_ifs=what_ifs,
             domain=domain,
             audience=audience,
+            business_understanding=analysis_input.business_understanding,
         )
         logger.info("预测叙述生成完成")
 
@@ -455,6 +456,7 @@ class PredictiveSimulator:
         what_ifs: list[WhatIf],
         domain: str,
         audience: str,
+        business_understanding: object | None = None,
     ) -> str:
         """生成预测解释叙述
 
@@ -467,6 +469,7 @@ class PredictiveSimulator:
             what_ifs: What-If 分析列表
             domain: 业务领域
             audience: 目标受众
+            business_understanding: L1 数据预扫描的业务理解结果（可选）
 
         Returns:
             str: 自然语言预测解释文本
@@ -489,6 +492,7 @@ class PredictiveSimulator:
                     scenarios=scenarios_text,
                     domain=domain or "通用",
                     audience=audience,
+                    business_understanding=business_understanding,  # type: ignore[arg-type]
                 )
                 narrative = self.llm.generate(
                     prompt=prompt,

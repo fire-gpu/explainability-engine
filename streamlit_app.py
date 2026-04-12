@@ -304,6 +304,23 @@ def main():
             index=0,
         )
 
+        # ---- 业务问题与场景描述 ----
+        st.markdown('<div class="sidebar-section-title">业务问题</div>', unsafe_allow_html=True)
+
+        business_question = st.text_input(
+            label="关键业务问题",
+            placeholder="例如：为什么利润在下降？",
+            key="question",
+            help="描述你最想从数据中找到答案的问题",
+        )
+
+        business_context = st.text_area(
+            label="业务场景描述",
+            placeholder="例如：这是一个 B2B SaaS 定价分析，数据来自过去一年的订阅数据...",
+            key="context",
+            help="提供业务背景信息，帮助分析引擎更好地理解数据含义",
+        )
+
         # ---- 目标变量 ----
         st.markdown('<div class="sidebar-section-title">目标变量</div>', unsafe_allow_html=True)
 
@@ -430,6 +447,8 @@ def main():
             target_variable=target_variable,
             causal_enabled=causal_enabled,
             predictive_enabled=predictive_enabled,
+            business_question=business_question or "",
+            business_context=business_context or "",
         )
 
         # 准备数据文件路径
