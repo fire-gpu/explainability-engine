@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Explainability Engine — AI 模型可解释性分析引擎</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ========== Reset & Base ========== */
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg-primary: #0a0a0f;
+  --bg-secondary: #111118;
+  --bg-card: #16161f;
+  --bg-code: #1a1a24;
+  --bg-code-header: #1e1e2a;
+  --text-primary: #e8e8ed;
+  --text-secondary: #9a9ab0;
+  --text-muted: #6a6a80;
+  --accent: #00d4aa;
+  --accent-dim: rgba(0, 212, 170, 0.12);
+  --accent-glow: rgba(0, 212, 170, 0.25);
+  --border: #2a2a3a;
+  --border-light: #222233;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --max-width: 780px;
+  --font-heading: 'Space Grotesk', 'Noto Sans SC', sans-serif;
+  --font-body: 'Noto Sans SC', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+html {
+  scroll-behavior: smooth;
+  font-size: 16px;
+}
+
+body {
+  font-family: var(--font-body);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  line-height: 1.8;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+  transition: opacity 0.2s;
+}
+a:hover { opacity: 0.8; }
+
+/* ========== Scrollbar ========== */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-primary); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* ========== Grid Background ========== */
+.grid-bg {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(255,255,255,0.03) 1px, transparent 0);
+  background-size: 40px 40px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.grid-bg::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(0, 212, 170, 0.06), transparent);
+}
+
+/* ========== Container ========== */
+.container {
+  position: relative;
+  z-index: 1;
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+/* ========== Fade-in Animation ========== */
+.fade-in {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.7s cubic-bezier(0.22, 1, 0.36, 1),
+              transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.fade-in.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ========== Hero ========== */
+.hero {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  padding: 80px 24px 60px;
+  position: relative;
+}
+
+.hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-bottom: 32px;
+  background: var(--bg-secondary);
+}
+
+.hero-badge .dot {
+  width: 6px; height: 6px;
+  background: var(--accent);
+  border-radius: 50%;
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 var(--accent-glow); }
+  50% { opacity: 0.7; box-shadow: 0 0 0 6px transparent; }
+}
+
+.hero h1 {
+  font-family: var(--font-heading);
+  font-size: clamp(2.5rem, 6vw, 4rem);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  margin-bottom: 20px;
+  background: linear-gradient(135deg, #ffffff 0%, var(--accent) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.hero .subtitle {
+  font-size: clamp(1rem, 2.5vw, 1.2rem);
+  color: var(--text-secondary);
+  max-width: 560px;
+  line-height: 1.7;
+  margin-bottom: 16px;
+}
+
+.hero .tags {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-bottom: 36px;
+}
+
+.hero .tag {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  padding: 4px 12px;
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+}
+
+.hero .cta-group {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 28px;
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+  font-weight: 500;
+  font-family: var(--font-body);
+  cursor: pointer;
+  transition: all 0.25s;
+  border: none;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #0a0a0f;
+}
+.btn-primary:hover {
+  background: #00eabb;
+  box-shadow: 0 0 24px var(--accent-glow);
+  opacity: 1;
+}
+
+.btn-outline {
+  background: transparent;
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+}
+.btn-outline:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  opacity: 1;
+}
+
+.btn svg { width: 18px; height: 18px; }
+
+/* ========== Stats Section ========== */
+.stats {
+  padding: 0 24px 80px;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.stat-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  padding: 28px 20px;
+  text-align: center;
+  transition: border-color 0.3s, transform 0.3s;
+}
+.stat-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+
+.stat-value {
+  font-family: var(--font-heading);
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1.2;
+  margin-bottom: 6px;
+}
+
+.stat-label {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+/* ========== Main Content ========== */
+.main-content {
+  padding: 0 24px 100px;
+}
+
+.article {
+  max-width: var(--max-width);
+  margin: 0 auto;
+}
+
+/* Section Headers */
+.article h2 {
+  font-family: var(--font-heading);
+  font-size: 1.6rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 64px 0 24px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-light);
+  letter-spacing: -0.01em;
+}
+
+.article h2 .section-num {
+  color: var(--accent);
+  margin-right: 8px;
+  font-weight: 700;
+}
+
+.article h3 {
+  font-family: var(--font-heading);
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 40px 0 16px;
+  padding-left: 14px;
+  border-left: 3px solid var(--accent);
+}
+
+.article h4 {
+  font-family: var(--font-heading);
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 28px 0 12px;
+}
+
+.article p {
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+  line-height: 1.9;
+}
+
+.article strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.article ul, .article ol {
+  color: var(--text-secondary);
+  padding-left: 24px;
+  margin-bottom: 16px;
+}
+
+.article li {
+  margin-bottom: 8px;
+  line-height: 1.8;
+}
+
+.article li::marker {
+  color: var(--accent);
+}
+
+/* ========== Code Block ========== */
+.code-block {
+  margin: 20px 0 28px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid var(--border-light);
+}
+
+.code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: var(--bg-code-header);
+  border-bottom: 1px solid var(--border-light);
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.code-header .dots {
+  display: flex;
+  gap: 6px;
+}
+
+.code-header .dots span {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--border);
+}
+
+.code-body {
+  background: var(--bg-code);
+  padding: 20px;
+  overflow-x: auto;
+}
+
+.code-body pre {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  line-height: 1.7;
+  color: var(--text-secondary);
+  white-space: pre;
+  margin: 0;
+}
+
+/* Syntax highlighting */
+.code-body .kw { color: #c792ea; }
+.code-body .fn { color: #82aaff; }
+.code-body .str { color: #c3e88d; }
+.code-body .cmt { color: #546e7a; font-style: italic; }
+.code-body .op { color: #89ddff; }
+.code-body .num { color: #f78c6c; }
+.code-body .dir { color: #00d4aa; }
+
+/* Inline code */
+.article code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--bg-code);
+  color: var(--accent);
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border-light);
+}
+
+/* ========== Blockquote ========== */
+.article blockquote {
+  margin: 20px 0 28px;
+  padding: 16px 20px;
+  border-left: 3px solid var(--accent);
+  background: var(--accent-dim);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+}
+
+/* ========== Divider ========== */
+.divider {
+  border: none;
+  height: 1px;
+  background: var(--border-light);
+  margin: 48px 0;
+}
+
+/* ========== Footer ========== */
+.footer {
+  border-top: 1px solid var(--border-light);
+  padding: 40px 24px;
+  text-align: center;
+}
+
+.footer-inner {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.footer p {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.footer a {
+  color: var(--accent);
+}
+
+.footer .built-with {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.footer .built-with svg {
+  width: 16px; height: 16px;
+}
+
+/* ========== Responsive ========== */
+@media (max-width: 640px) {
+  .hero { padding: 60px 20px 40px; }
+  .hero h1 { font-size: 2rem; }
+  .stats-grid { grid-template-columns: 1fr; max-width: 280px; }
+  .stat-card { padding: 20px 16px; }
+  .stat-value { font-size: 1.5rem; }
+  .article h2 { font-size: 1.35rem; margin-top: 48px; }
+  .code-body { padding: 14px; }
+  .code-body pre { font-size: 0.75rem; }
+  .btn { padding: 10px 22px; font-size: 0.85rem; }
+  .container { padding: 0 16px; }
+  .main-content { padding: 0 16px 60px; }
+}
+
+@media (max-width: 380px) {
+  .hero h1 { font-size: 1.7rem; }
+  .hero .subtitle { font-size: 0.9rem; }
+}
+</style>
+</head>
+<body>
+
+<!-- Grid Background -->
+<div class="grid-bg" aria-hidden="true"></div>
+
+<!-- ==================== Hero ==================== -->
+<section class="hero">
+  <div class="hero-badge">
+    <span class="dot"></span>
+    <span>Open Source Project</span>
+  </div>
+  <h1>Explainability Engine</h1>
+  <p class="subtitle">AI 模型可解释性分析引擎 — 让模型决策透明可解释</p>
+  <div class="tags">
+    <span class="tag">Code With SOLO</span>
+    <span class="tag">TRAE 挑战赛作品</span>
+  </div>
+  <div class="cta-group">
+    <a href="https://github.com" class="btn btn-primary" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+      GitHub
+    </a>
+    <a href="#overview" class="btn btn-outline">
+      了解更多
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+    </a>
+  </div>
+</section>
+
+<!-- ==================== Stats ==================== -->
+<section class="stats fade-in" id="overview">
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-value">8,000+</div>
+      <div class="stat-label">行代码</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">29</div>
+      <div class="stat-label">测试通过</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">v0.2</div>
+      <div class="stat-label">迭代版本</div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== Main Content ==================== -->
+<main class="main-content">
+  <article class="article">
+
+    <!-- Section 1: 摘要 -->
+    <h2 class="fade-in"><span class="section-num">1.</span>摘要</h2>
+    <p class="fade-in">用 TRAE SOLO 从一个想法出发，经过需求澄清、架构设计、方案选型，到完整实现了一个 8000+ 行代码的 Python 可解释性分析引擎。支持文件上传自动分析、因果推断、预测模拟，生成分层报告，并附带 Streamlit 在线 Demo。</p>
+
+    <!-- Section 2: 背景 -->
+    <h2 class="fade-in"><span class="section-num">2.</span>背景</h2>
+    <p class="fade-in">我是一名 AI 应用开发者，在实际项目中经常遇到一个问题：模型输出缺乏可解释性。比如定价策略模型给出了推荐价格，但业务方会问<strong>"为什么是这个价格？""如果成本涨 10% 会怎样？"</strong>——这些问题很难快速回答。</p>
+
+    <!-- Section 3: 实践过程 -->
+    <h2 class="fade-in"><span class="section-num">3.</span>实践过程</h2>
+
+    <h3 class="fade-in">第一步：需求澄清与架构设计（Brainstorming）</h3>
+    <p class="fade-in">我首先调用了 SOLO 的 brainstorming skill，SOLO 通过多轮对话帮我理清了需求：</p>
+    <ul class="fade-in">
+      <li><strong>模型无关</strong>：不绑定特定模型，支持任意数据分析场景</li>
+      <li><strong>三层解释能力</strong>：描述性（发生了什么）→ 因果性（为什么）→ 预测性（如果...会怎样）</li>
+      <li><strong>分层报告</strong>：执行摘要面向业务、详细分析面向技术、技术附录面向数据科学家</li>
+      <li><strong>技术栈</strong>：Python + 状态机 + LLM 混合引擎</li>
+    </ul>
+    <p class="fade-in">SOLO 提出了 3 种架构方案并给出了推荐，最终选定<strong>方案 B（混合引擎）</strong>。</p>
+
+    <h3 class="fade-in">第二步：任务拆解与并行实现</h3>
+    <p class="fade-in">SOLO 将项目拆解为 6 个阶段，并通过并行 agent 加速实现：项目脚手架、基础模块、分析引擎、报告生成、测试与配置、发布准备。</p>
+
+    <h3 class="fade-in">第三步：添加在线 Demo</h3>
+    <p class="fade-in">创建了一个 Streamlit Web Demo，支持浏览器端上传文件、侧边栏配置、四个 Tab 页展示报告、一键下载报告。</p>
+
+    <!-- Section 4: 成果展示 -->
+    <h2 class="fade-in"><span class="section-num">4.</span>成果展示</h2>
+    <p class="fade-in">项目统计：<strong>33 个 Python 源文件</strong>、<strong>8,033 行代码</strong>、<strong>29 个测试用例</strong>、<strong>4 个领域配置</strong>。</p>
+
+    <h3 class="fade-in">项目结构</h3>
+    <div class="code-block fade-in">
+      <div class="code-header">
+        <div class="dots"><span></span><span></span><span></span></div>
+        <span>project structure</span>
+      </div>
+      <div class="code-body">
+<pre><span class="dir">explainability-engine/</span>
+├── <span class="dir">core/</span>           <span class="cmt"># 状态机、编排器、22 个数据结构</span>
+├── <span class="dir">analyzers/</span>      <span class="cmt"># 文件解析器、描述/因果/预测分析器</span>
+├── <span class="dir">llm/</span>            <span class="cmt"># LLM 客户端、Prompt 模板、防幻觉校验</span>
+├── <span class="dir">rules/</span>          <span class="cmt"># 规则引擎 + 15 条预定义规则</span>
+├── <span class="dir">report/</span>         <span class="cmt"># 报告生成器 + Markdown/HTML 渲染器</span>
+├── <span class="dir">config/</span>         <span class="cmt"># 全局配置 + 4 个领域 YAML</span>
+├── <span class="dir">cli/</span>            <span class="cmt"># 命令行入口</span>
+├── <span class="dir">tests/</span>          <span class="cmt"># 29 个测试用例</span>
+├── <span class="dir">examples/</span>       <span class="cmt"># 示例数据</span>
+└── <span class="fn">streamlit_app.py</span>  <span class="cmt"># 在线 Demo</span></pre>
+      </div>
+    </div>
+
+    <!-- Section 5: 效果与总结 -->
+    <h2 class="fade-in"><span class="section-num">5.</span>效果与总结</h2>
+    <p class="fade-in">从想法到完整项目，纯手工开发预计需要 <strong>1-2 周</strong>，使用 SOLO 在<strong>一个会话内完成</strong>。</p>
+
+    <!-- Section 6: v0.2 迭代 -->
+    <h2 class="fade-in"><span class="section-num">6.</span>v0.2 迭代（2026-04-12）</h2>
+    <ul class="fade-in">
+      <li>新增数据预扫描模块，LLM 自动推断业务场景</li>
+      <li>报告真正区分业务版和技术版</li>
+      <li>自然语言模板重写为流畅的叙述性语言</li>
+    </ul>
+
+    <!-- Section 7: 剩余改进方向 -->
+    <h2 class="fade-in"><span class="section-num">7.</span>剩余改进方向</h2>
+    <ul class="fade-in">
+      <li>可视化图表（plotly）</li>
+      <li>交互式探索（追问模式）</li>
+      <li>L2 RAG 领域知识注入</li>
+      <li>因果推断增强（DoWhy / CausalNex）</li>
+      <li>多数据源 / PDF / PPT</li>
+    </ul>
+
+  </article>
+</main>
+
+<!-- ==================== Footer ==================== -->
+<footer class="footer">
+  <div class="footer-inner">
+    <p class="built-with">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+      Built with TRAE SOLO
+    </p>
+    <p>
+      <a href="https://github.com" target="_blank" rel="noopener">
+        <svg style="width:20px;height:20px;vertical-align:middle;margin-right:4px;" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        GitHub
+      </a>
+    </p>
+  </div>
+</footer>
+
+<!-- ==================== Scroll Animation ==================== -->
+<script>
+(function() {
+  const observer = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+        }
+      });
+    },
+    {
+      threshold: 0.1,
+      rootMargin: '0px 0px -40px 0px'
+    }
+  );
+
+  document.querySelectorAll('.fade-in').forEach((el) => {
+    observer.observe(el);
+  });
+})();
+</script>
+
+</body>
+</html>
