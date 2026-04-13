@@ -53,7 +53,7 @@ class Settings:
         self.llm_temperature: float = 0.2
         self.llm_max_retries: int = 3
 
-        self.default_domain: str = ""
+        self.default_domain: str = "generic"
         self.default_audience: str = "analyst"
         self.default_depth: str = "standard"
 

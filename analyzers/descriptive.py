@@ -25,6 +25,7 @@ from core.models import (
 )
 
 if TYPE_CHECKING:
+    from core.models import DomainConfig
     from llm.client import LLMClient
 
 logger = logging.getLogger(__name__)
@@ -70,11 +71,12 @@ class DescriptiveAnalyzer:
         target = analysis_input.config.target_variable
         domain = analysis_input.metadata.domain
         audience = analysis_input.config.audience
+        domain_config = analysis_input.metadata.domain_config
 
         logger.info("开始描述性分析，数据形状: %s", df.shape)
 
-        # 1. 计算变量重要性
-        importance = self._compute_variable_importance(df, target)
+        # 1. 计算变量重要性（领域关键变量加权提升）
+        importance = self._compute_variable_importance(df, target, domain_config)
         logger.info("变量重要性计算完成，共 %d 个变量", len(importance))
 
         # 2. 计算各变量分布特征
@@ -98,6 +100,7 @@ class DescriptiveAnalyzer:
             domain=domain,
             audience=audience,
             business_understanding=analysis_input.business_understanding,
+            domain_config=domain_config,
         )
         logger.info("叙述生成完成")
 
@@ -110,16 +113,23 @@ class DescriptiveAnalyzer:
         )
 
     def _compute_variable_importance(
-        self, df: pd.DataFrame, target: str | None
+        self,
+        df: pd.DataFrame,
+        target: str | None,
+        domain_config: object | None = None,
     ) -> list[VarImportance]:
         """计算变量重要性排名
 
         如果指定了目标变量，使用互信息（mutual information）衡量各变量
         对目标变量的预测能力；否则使用方差贡献比例作为重要性指标。
 
+        如果提供了领域配置且包含 key_variables，则对关键变量的
+        重要性得分进行加权提升（+20%），使领域关键变量在排名中更突出。
+
         Args:
             df: 输入数据框
             target: 目标变量名，为 None 时使用方差贡献
+            domain_config: 领域配置对象（可选）
 
         Returns:
             list[VarImportance]: 按重要性降序排列的变量重要性列表
@@ -131,10 +141,58 @@ class DescriptiveAnalyzer:
 
         if target and target in df.columns:
             # 有目标变量：使用互信息
-            return self._importance_by_mutual_info(df, numeric_cols, target)
+            results = self._importance_by_mutual_info(df, numeric_cols, target)
         else:
             # 无目标变量：使用方差贡献比例
-            return self._importance_by_variance(df, numeric_cols)
+            results = self._importance_by_variance(df, numeric_cols)
+
+        # 如果有领域配置，对关键变量进行加权提升
+        if domain_config is not None:
+            results = self._boost_key_variables(results, domain_config)
+
+        return results
+
+    def _boost_key_variables(
+        self,
+        results: list[VarImportance],
+        domain_config: object,
+    ) -> list[VarImportance]:
+        """对领域关键变量的重要性得分进行加权提升
+
+        将 key_variables 中的变量得分提升 20%，然后重新排序。
+
+        Args:
+            results: 原始变量重要性列表
+            domain_config: 领域配置对象
+
+        Returns:
+            list[VarImportance]: 加权后的变量重要性列表（已重新排序）
+        """
+        key_vars = set(domain_config.key_variables) if domain_config.key_variables else set()
+        if not key_vars:
+            return results
+
+        boosted_count = 0
+        for item in results:
+            if item.name in key_vars:
+                item.score = round(item.score * 1.2, 4)
+                boosted_count += 1
+                logger.debug(
+                    "关键变量加权提升: %s，得分 %.4f -> %.4f",
+                    item.name,
+                    item.score / 1.2,
+                    item.score,
+                )
+
+        if boosted_count > 0:
+            logger.info("已对 %d 个领域关键变量进行加权提升（+20%%）", boosted_count)
+
+        # 重新排序并分配排名
+        results.sort(key=lambda x: x.score, reverse=True)
+        for i, item in enumerate(results):
+            item.rank = i + 1
+
+        return results
 
     def _importance_by_mutual_info(
         self, df: pd.DataFrame, numeric_cols: list[str], target: str
@@ -425,11 +483,15 @@ class DescriptiveAnalyzer:
         domain: str,
         audience: str,
         business_understanding: object | None = None,
+        domain_config: object | None = None,
     ) -> str:
         """生成自然语言叙述
 
         如果配置了 LLM 客户端，调用 LLM 生成叙述；
         否则使用模板拼接生成结构化文字描述。
+
+        如果提供了领域配置且包含 explanation_focus，
+        会将其传入 prompt，引导 LLM 重点关注这些方向。
 
         Args:
             importance: 变量重要性列表
@@ -439,6 +501,7 @@ class DescriptiveAnalyzer:
             domain: 业务领域
             audience: 目标受众
             business_understanding: L1 数据预扫描的业务理解结果（可选）
+            domain_config: 领域配置对象（可选）
 
         Returns:
             str: 自然语言叙述文本
@@ -447,6 +510,11 @@ class DescriptiveAnalyzer:
         data_summary = self._build_data_summary(
             importance, distributions, correlations, anomalies
         )
+
+        # 提取领域配置中的解释重点方向
+        explanation_focus: list[str] = []
+        if domain_config is not None and hasattr(domain_config, "explanation_focus"):
+            explanation_focus = domain_config.explanation_focus or []
 
         if self.llm is not None:
             try:
@@ -457,6 +525,7 @@ class DescriptiveAnalyzer:
                     domain=domain or "通用",
                     audience=audience,
                     business_understanding=business_understanding,  # type: ignore[arg-type]
+                    explanation_focus=explanation_focus if explanation_focus else None,
                 )
                 narrative = self.llm.generate(
                     prompt=prompt,

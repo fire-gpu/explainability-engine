@@ -2,7 +2,16 @@
 因果推断引擎模块
 
 回答"为什么会这样"——基于描述性分析结果，构建因果假设图，
-估计因果效应大小，生成反事实分析，并通过 LLM 生成因果解释叙述。
+使用 DoWhy 框架（或 OLS 回退方案）估计因果效应大小，
+生成反事实分析，并通过 LLM 生成因果解释叙述。
+
+当 DoWhy 可用时，采用四步框架：
+1. 建模（Model）——基于因果假设图构建因果模型
+2. 识别（Identify）——确定因果效应的可识别性
+3. 估计（Estimate）——使用 backdoor 准则估计因果效应
+4. 反驳（Refute）——通过安慰剂检验等手段验证结果
+
+当 DoWhy 不可用时，回退到 OLS 线性回归方法。
 """
 
 from __future__ import annotations
@@ -36,7 +45,8 @@ class CausalAnalyzer:
     """因果推断引擎 - 回答"为什么会这样"
 
     基于描述性分析中发现的相关性，结合领域知识构建因果假设，
-    使用回归分析方法估计因果效应，并生成反事实推理结果。
+    优先使用 DoWhy 框架进行因果推断（建模-识别-估计-反驳），
+    当 DoWhy 不可用时回退到 OLS 回归分析方法。
 
     Args:
         llm_client: LLM 客户端实例，为 None 时使用模板回退生成叙述
@@ -49,6 +59,23 @@ class CausalAnalyzer:
             llm_client: 可选的 LLM 客户端，用于生成自然语言叙述
         """
         self.llm = llm_client
+        self._dowhy_available = self._check_dowhy()
+
+    def _check_dowhy(self) -> bool:
+        """检查 DoWhy 是否可用
+
+        通过尝试导入 dowhy 包来判断是否已安装。
+
+        Returns:
+            bool: DoWhy 可用时返回 True，否则返回 False
+        """
+        try:
+            import dowhy  # noqa: F401
+            logger.info("DoWhy 因果推断库已加载")
+            return True
+        except ImportError:
+            logger.info("DoWhy 未安装，将使用 OLS 回退方案")
+            return False
 
     def analyze(
         self,
@@ -59,7 +86,7 @@ class CausalAnalyzer:
 
         分析流程：
         1. 基于相关性和领域知识构建因果假设图
-        2. 估计因果效应大小（回归分析 + 控制变量）
+        2. 估计因果效应大小（DoWhy 框架或 OLS 回退）
         3. 生成反事实分析
         4. LLM 生成因果解释叙述
 
@@ -75,11 +102,12 @@ class CausalAnalyzer:
         domain = analysis_input.metadata.domain
         audience = analysis_input.config.audience
         correlations = desc_result.correlations
+        metadata = analysis_input.metadata
 
-        logger.info("开始因果分析")
+        logger.info("开始因果分析（DoWhy=%s）", self._dowhy_available)
 
         # 1. 构建因果假设图
-        graph = self._build_causal_hypotheses(df, correlations, domain)
+        graph = self._build_causal_hypotheses(df, correlations, domain, metadata)
         logger.info(
             "因果假设图构建完成，节点数: %d, 边数: %d",
             len(graph.nodes),
@@ -87,8 +115,12 @@ class CausalAnalyzer:
         )
 
         # 2. 估计因果效应
-        effects = self._estimate_causal_effects(df, graph, target)
-        logger.info("因果效应估计完成，共 %d 个效应", len(effects))
+        if self._dowhy_available:
+            effects = self._estimate_causal_effects_dowhy(df, graph, target)
+            logger.info("DoWhy 因果效应估计完成，共 %d 个效应", len(effects))
+        else:
+            effects = self._estimate_causal_effects_fallback(df, graph, target)
+            logger.info("OLS 回退因果效应估计完成，共 %d 个效应", len(effects))
 
         # 3. 生成反事实分析
         counterfactuals = self._generate_counterfactuals(df, effects, target)
@@ -112,21 +144,29 @@ class CausalAnalyzer:
             narrative=narrative,
         )
 
+    # ================================================================
+    # 因果假设图构建
+    # ================================================================
+
     def _build_causal_hypotheses(
         self,
         df: pd.DataFrame,
         correlations: list[CorrelationPair],
         domain: str,
+        metadata: object | None = None,
     ) -> CausalGraph:
         """构建因果假设图
 
         基于描述性分析中的相关性结果，结合偏相关分析辅助判断
         因果方向，生成候选因果边并标记置信度。
+        如果 metadata 中包含 domain_config.causal_templates，
+        则将领域模板中的因果边也纳入图中。
 
         Args:
             df: 输入数据框
             correlations: 相关性对列表
             domain: 业务领域
+            metadata: 数据元信息（可选，用于获取领域配置）
 
         Returns:
             CausalGraph: 因果假设图
@@ -186,10 +226,43 @@ class CausalAnalyzer:
                 )
             )
 
+        # 如果有领域配置中的因果模板，将模板边也纳入图中
+        try:
+            if metadata is not None and hasattr(metadata, 'domain_config') and metadata.domain_config is not None:
+                domain_config = metadata.domain_config
+                if hasattr(domain_config, 'causal_templates') and domain_config.causal_templates:
+                    for tmpl in domain_config.causal_templates:
+                        tmpl_from = tmpl.cause if hasattr(tmpl, 'cause') else tmpl.from_node
+                        tmpl_to = tmpl.effect if hasattr(tmpl, 'effect') else tmpl.to_node
+                        # 避免重复添加已存在的边
+                        existing = any(
+                            e.from_node == tmpl_from and e.to_node == tmpl_to
+                            for e in edges
+                        )
+                        if not existing:
+                            edges.append(
+                                CausalEdge(
+                                    from_node=tmpl_from,
+                                    to_node=tmpl_to,
+                                    effect_size=0.0,
+                                    p_value=1.0,
+                                    method="领域模板",
+                                )
+                            )
+                            all_vars.add(tmpl_from)
+                            all_vars.add(tmpl_to)
+                    nodes = sorted(all_vars)
+        except Exception as e:
+            logger.debug("处理领域因果模板时出错，跳过: %s", e)
+
+        method_label = "相关性推导 + 偏相关分析"
+        if self._dowhy_available:
+            method_label += "（DoWhy 框架）"
+
         return CausalGraph(
             nodes=nodes,
             edges=edges,
-            method="相关性推导 + 偏相关分析",
+            method=method_label,
         )
 
     def _infer_direction(
@@ -275,13 +348,299 @@ class CausalAnalyzer:
             logger.debug("偏相关分析失败: %s", e)
             return "forward", 0.5
 
-    def _estimate_causal_effects(
+    # ================================================================
+    # DoWhy 因果效应估计
+    # ================================================================
+
+    def _estimate_causal_effects_dowhy(
         self,
         df: pd.DataFrame,
         graph: CausalGraph,
         target: str | None,
     ) -> list[CausalEffect]:
-        """估计因果效应大小
+        """使用 DoWhy 估计因果效应
+
+        对因果图中的每条边执行 DoWhy 四步框架：
+        1. 构建 CausalModel（将因果图转为 DOT 格式）
+        2. 调用 identify_effect() 检查可识别性
+        3. 调用 estimate_effect(method_name="backdoor.linear_regression")
+        4. 调用反驳测试（安慰剂检验）
+
+        如果某条边的 identify_effect 失败（图不满足 backdoor 准则），
+        则跳过该边并回退到 OLS 方法。
+
+        Args:
+            df: 输入数据框
+            graph: 因果假设图
+            target: 目标变量名
+
+        Returns:
+            list[CausalEffect]: 因果效应估计列表
+        """
+        import dowhy
+
+        if not graph.edges:
+            return []
+
+        effects: list[CausalEffect] = []
+        numeric_cols = set(df.select_dtypes(include=[np.number]).columns)
+
+        for edge in graph.edges:
+            # 如果指定了目标变量，只分析指向目标的边
+            if target and edge.to_node != target:
+                continue
+
+            treatment = edge.from_node
+            outcome = edge.to_node
+
+            # DoWhy 需要 treatment 和 outcome 都是数值列
+            if treatment not in numeric_cols or outcome not in numeric_cols:
+                logger.debug(
+                    "跳过非数值变量对: %s -> %s，将使用 OLS 回退",
+                    treatment, outcome,
+                )
+                # 对非数值变量回退到 OLS
+                fallback_effect = self._run_regression(
+                    df, treatment, outcome,
+                    self._get_control_variables(graph, treatment, outcome, df),
+                )
+                if fallback_effect is not None:
+                    effects.append(fallback_effect)
+                continue
+
+            if treatment not in df.columns or outcome not in df.columns:
+                continue
+
+            try:
+                # 将因果图转换为 DOT 格式
+                dot_graph = self._graph_to_dot(graph)
+
+                # 第 1 步：建模（Model）
+                causal_model = dowhy.CausalModel(
+                    data=df,
+                    treatment=treatment,
+                    outcome=outcome,
+                    graph=dot_graph,
+                )
+
+                # 第 2 步：识别（Identify）
+                try:
+                    identified_estimand = causal_model.identify_effect()
+                except Exception as identify_err:
+                    logger.warning(
+                        "DoWhy 识别失败 (%s -> %s): %s，回退到 OLS",
+                        treatment, outcome, identify_err,
+                    )
+                    fallback_effect = self._run_regression(
+                        df, treatment, outcome,
+                        self._get_control_variables(graph, treatment, outcome, df),
+                    )
+                    if fallback_effect is not None:
+                        effects.append(fallback_effect)
+                    continue
+
+                # 第 3 步：估计（Estimate）
+                try:
+                    estimate = causal_model.estimate_effect(
+                        identified_estimand,
+                        method_name="backdoor.linear_regression",
+                    )
+                except Exception as estimate_err:
+                    logger.warning(
+                        "DoWhy 估计失败 (%s -> %s): %s，回退到 OLS",
+                        treatment, outcome, estimate_err,
+                    )
+                    fallback_effect = self._run_regression(
+                        df, treatment, outcome,
+                        self._get_control_variables(graph, treatment, outcome, df),
+                    )
+                    if fallback_effect is not None:
+                        effects.append(fallback_effect)
+                    continue
+
+                # 第 4 步：反驳测试（Refute）——仅运行安慰剂检验
+                refutation_results: dict | None = None
+                try:
+                    refutation_results = self._refute_test(
+                        causal_model, identified_estimand, estimate
+                    )
+                except Exception as refute_err:
+                    logger.debug(
+                        "DoWhy 反驳测试失败 (%s -> %s): %s，跳过反驳",
+                        treatment, outcome, refute_err,
+                    )
+
+                # 提取估计结果
+                effect_value = float(estimate.value)
+                confidence_interval = (
+                    float(estimate.get_confidence_intervals()[0][0]),
+                    float(estimate.get_confidence_intervals()[0][1]),
+                ) if hasattr(estimate, 'get_confidence_intervals') and estimate.get_confidence_intervals() is not None else (0.0, 0.0)
+
+                # 尝试获取 p 值
+                p_value: float | None = None
+                try:
+                    # DoWhy 的 estimate 对象可能包含 p 值信息
+                    if hasattr(estimate, 'test_significance'):
+                        test_result = estimate.test_significance(identified_estimand)
+                        if hasattr(test_result, 'p_value'):
+                            p_value = round(float(test_result.p_value), 4)
+                except Exception:
+                    pass
+
+                effects.append(
+                    CausalEffect(
+                        treatment=treatment,
+                        outcome=outcome,
+                        effect_size=round(effect_value, 4),
+                        confidence_interval=confidence_interval,
+                        p_value=p_value,
+                        method="dowhy.backdoor.linear_regression",
+                        refutation_results=refutation_results,
+                        identified=True,
+                    )
+                )
+
+                logger.info(
+                    "DoWhy 估计成功: %s -> %s, ATE=%.4f",
+                    treatment, outcome, effect_value,
+                )
+
+            except Exception as e:
+                logger.warning(
+                    "DoWhy 处理失败 (%s -> %s): %s，回退到 OLS",
+                    treatment, outcome, e,
+                )
+                fallback_effect = self._run_regression(
+                    df, treatment, outcome,
+                    self._get_control_variables(graph, treatment, outcome, df),
+                )
+                if fallback_effect is not None:
+                    effects.append(fallback_effect)
+
+        # 按效应大小排序
+        effects.sort(key=lambda e: abs(e.effect_size), reverse=True)
+
+        return effects
+
+    def _graph_to_dot(self, graph: CausalGraph) -> str:
+        """将 CausalGraph 转换为 DOT 格式字符串
+
+        将因果假设图转换为 DoWhy 可识别的 DOT 格式图定义。
+        每条边表示为 "from_node -> to_node;" 的形式。
+
+        Args:
+            graph: 因果假设图
+
+        Returns:
+            str: DOT 格式的因果图字符串，如 "digraph { cost -> price; price -> demand; }"
+        """
+        if not graph.edges:
+            return "digraph {}"
+
+        edge_lines = []
+        for edge in graph.edges:
+            edge_lines.append(f"{edge.from_node} -> {edge.to_node};")
+
+        return "digraph {\n" + "\n".join(edge_lines) + "\n}"
+
+    def _refute_test(
+        self,
+        causal_model: object,
+        identified_estimand: object,
+        estimate: object,
+    ) -> dict:
+        """执行 DoWhy 反驳测试
+
+        运行以下反驳测试以验证因果效应估计的稳健性：
+        1. placebo_treatment_refuter: 安慰剂检验 —— 将处理变量替换为随机变量，
+           如果效应仍然显著则说明原估计不可靠
+        2. random_common_cause: 随机共同原因 —— 添加随机变量作为共同原因，
+           如果效应变化很大则说明原估计对混杂因子敏感
+
+        Args:
+            causal_model: DoWhy 的 CausalModel 实例
+            identified_estimand: 识别出的估计量
+            estimate: 估计结果
+
+        Returns:
+            dict: 反驳测试结果，格式为
+                {
+                    "placebo": {"passed": bool, "details": str},
+                    "random_cause": {"passed": bool, "details": str},
+                }
+        """
+        results: dict = {}
+
+        # 安慰剂检验
+        try:
+            placebo_refuter = causal_model.refute_estimate(
+                identified_estimand,
+                estimate,
+                method_name="placebo_treatment_refuter",
+                placebo_type="permute",
+            )
+            # 安慰剂检验通过条件：安慰剂效应应接近于 0
+            placebo_effect = float(placebo_refuter.new_effect)
+            original_effect = float(estimate.value)
+            # 如果安慰剂效应的绝对值小于原始效应的 10%，认为通过
+            passed = abs(placebo_effect) < 0.1 * (abs(original_effect) + 1e-10)
+            results["placebo"] = {
+                "passed": passed,
+                "details": (
+                    f"安慰剂效应={placebo_effect:.4f}, "
+                    f"原始效应={original_effect:.4f}, "
+                    f"{'通过' if passed else '未通过'}"
+                ),
+            }
+        except Exception as e:
+            logger.debug("安慰剂检验执行失败: %s", e)
+            results["placebo"] = {
+                "passed": None,
+                "details": f"安慰剂检验执行失败: {e}",
+            }
+
+        # 随机共同原因检验
+        try:
+            random_cause_refuter = causal_model.refute_estimate(
+                identified_estimand,
+                estimate,
+                method_name="random_common_cause",
+            )
+            random_effect = float(random_cause_refuter.new_effect)
+            original_effect = float(estimate.value)
+            # 如果效应变化不超过 20%，认为通过
+            relative_change = abs(random_effect - original_effect) / (abs(original_effect) + 1e-10)
+            passed = relative_change < 0.2
+            results["random_cause"] = {
+                "passed": passed,
+                "details": (
+                    f"加入随机共同原因后效应={random_effect:.4f}, "
+                    f"原始效应={original_effect:.4f}, "
+                    f"相对变化={relative_change:.2%}, "
+                    f"{'通过' if passed else '未通过'}"
+                ),
+            }
+        except Exception as e:
+            logger.debug("随机共同原因检验执行失败: %s", e)
+            results["random_cause"] = {
+                "passed": None,
+                "details": f"随机共同原因检验执行失败: {e}",
+            }
+
+        return results
+
+    # ================================================================
+    # OLS 回退方案
+    # ================================================================
+
+    def _estimate_causal_effects_fallback(
+        self,
+        df: pd.DataFrame,
+        graph: CausalGraph,
+        target: str | None,
+    ) -> list[CausalEffect]:
+        """使用 OLS 回归估计因果效应（DoWhy 不可用时的回退方案）
 
         使用线性回归 + 控制变量方法估计每个因果边的效应大小。
         如果指定了目标变量，只估计指向目标变量的因果效应。
@@ -450,12 +809,18 @@ class CausalAnalyzer:
                 effect_size=round(effect_size, 4),
                 confidence_interval=confidence_interval,
                 p_value=p_value,
-                method="OLS 线性回归",
+                method="ols",
+                refutation_results=None,
+                identified=False,
             )
 
         except Exception as e:
             logger.debug("回归分析失败 (%s -> %s): %s", treatment, outcome, e)
             return None
+
+    # ================================================================
+    # 反事实分析
+    # ================================================================
 
     def _generate_counterfactuals(
         self,
@@ -531,6 +896,10 @@ class CausalAnalyzer:
 
         return counterfactuals
 
+    # ================================================================
+    # 叙述生成
+    # ================================================================
+
     def _generate_narrative(
         self,
         graph: CausalGraph,
@@ -560,7 +929,11 @@ class CausalAnalyzer:
         causal_findings = self._build_causal_findings(graph, effects, counterfactuals)
 
         # 构建数据概要
-        data_summary = f"因果图包含 {len(graph.nodes)} 个节点和 {len(graph.edges)} 条因果边。"
+        method_label = "DoWhy 因果推断框架" if self._dowhy_available else "OLS 线性回归"
+        data_summary = (
+            f"因果图包含 {len(graph.nodes)} 个节点和 {len(graph.edges)} 条因果边。"
+            f"因果效应估计方法: {method_label}。"
+        )
 
         if self.llm is not None:
             try:
@@ -615,22 +988,38 @@ class CausalAnalyzer:
         if effects:
             lines.append("\n### 因果效应估计")
             for eff in effects:
-                ci_str = (
-                    f", 95%置信区间=[{eff.confidence_interval[0]}, {eff.confidence_interval[1]}]"
-                    if eff.confidence_interval
-                    else ""
-                )
+                ci_str = ""
+                if eff.confidence_interval:
+                    ci_str = (
+                        f", 95%置信区间=[{eff.confidence_interval[0]}, "
+                        f"{eff.confidence_interval[1]}]"
+                    )
+                method_label = eff.method or "未知"
                 lines.append(
                     f"- {eff.treatment} -> {eff.outcome}: "
                     f"ATE={eff.effect_size}, p值={eff.p_value}{ci_str}, "
-                    f"方法={eff.method}"
+                    f"方法={method_label}"
                 )
+
+                # 如果有反驳测试结果，附加到发现中
+                if eff.refutation_results:
+                    lines.append("  反驳测试:")
+                    for test_name, test_result in eff.refutation_results.items():
+                        if isinstance(test_result, dict):
+                            passed = test_result.get("passed")
+                            details = test_result.get("details", "")
+                            status = "通过" if passed else ("未通过" if passed is False else "未知")
+                            lines.append(f"    - {test_name}: {status} ({details})")
 
         # 反事实分析
         if counterfactuals:
             lines.append("\n### 反事实分析")
             for cf in counterfactuals:
-                change = cf.predicted_outcome - cf.original_outcome if cf.predicted_outcome is not None and cf.original_outcome is not None else 0
+                change = (
+                    cf.predicted_outcome - cf.original_outcome
+                    if cf.predicted_outcome is not None and cf.original_outcome is not None
+                    else 0
+                )
                 lines.append(
                     f"- 若「{cf.treatment}」从 {cf.original_value} 变为 {cf.counterfactual_value}，"
                     f"「预测结果」变化 {change:+.4f}"
@@ -660,11 +1049,16 @@ class CausalAnalyzer:
 
         domain_prefix = f"在「{domain}」领域" if domain else "在本次分析中"
 
+        # 判断是否使用了 DoWhy
+        dowhy_used = any("dowhy" in (e.method or "") for e in effects)
+        method_desc = "DoWhy 因果推断框架（建模-识别-估计-反驳）" if dowhy_used else "OLS 线性回归"
+
         # 因果图概述
         if graph.edges:
             parts.append(
                 f"{domain_prefix}，通过相关性分析和偏相关分析，"
                 f"构建了包含 {len(graph.nodes)} 个变量、{len(graph.edges)} 条因果边的假设图。"
+                f"因果效应估计采用{method_desc}方法。"
             )
         else:
             parts.append(f"{domain_prefix}，未发现足够的证据构建因果假设。")
@@ -676,11 +1070,30 @@ class CausalAnalyzer:
             eff_descs = []
             for eff in significant[:3]:
                 direction = "正向" if eff.effect_size > 0 else "负向"
+                method_tag = f"（{eff.method}）" if eff.method else ""
                 eff_descs.append(
                     f"「{eff.treatment}」对「{eff.outcome}」有{direction}因果效应"
-                    f"（效应大小: {eff.effect_size}）"
+                    f"（效应大小: {eff.effect_size}）{method_tag}"
                 )
             parts.append("显著的因果效应包括：" + "；".join(eff_descs) + "。")
+
+            # DoWhy 反驳测试结果摘要
+            dowhy_effects = [e for e in significant if e.refutation_results]
+            if dowhy_effects:
+                refutation_summary_parts = []
+                for eff in dowhy_effects:
+                    for test_name, test_result in eff.refutation_results.items():
+                        if isinstance(test_result, dict):
+                            passed = test_result.get("passed")
+                            if passed is True:
+                                refutation_summary_parts.append(
+                                    f"「{eff.treatment}」->「{eff.outcome}」的"
+                                    f"{test_name}检验通过"
+                                )
+                if refutation_summary_parts:
+                    parts.append(
+                        "反驳测试验证：" + "；".join(refutation_summary_parts[:3]) + "。"
+                    )
 
         # 反事实洞察
         if counterfactuals:
@@ -690,9 +1103,16 @@ class CausalAnalyzer:
             )
 
         # 局限性说明
-        parts.append(
-            "注意：以上因果分析基于观察数据和统计假设，"
-            "因果关系的确认需要进一步的实验验证或领域专家的确认。"
-        )
+        if dowhy_used:
+            parts.append(
+                "注意：以上因果分析基于 DoWhy 框架的观察数据推断，"
+                "因果关系的确认需要进一步的实验验证或领域专家的确认。"
+                "反驳测试仅提供了部分稳健性验证，不能完全排除未观测混杂因子的影响。"
+            )
+        else:
+            parts.append(
+                "注意：以上因果分析基于观察数据和统计假设，"
+                "因果关系的确认需要进一步的实验验证或领域专家的确认。"
+            )
 
         return "\n\n".join(parts)

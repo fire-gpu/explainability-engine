@@ -14,6 +14,53 @@ import pandas as pd
 
 
 # ============================================================
+# 领域配置
+# ============================================================
+
+
+@dataclass
+class CausalTemplate:
+    """因果假设模板
+
+    从领域配置 YAML 中加载的因果先验知识，
+    用于引导因果发现过程。
+
+    Attributes:
+        from_var: 原因变量名
+        to_var: 结果变量名
+        description: 因果关系的业务描述
+    """
+
+    from_var: str
+    to_var: str
+    description: str = ""
+
+
+@dataclass
+class DomainConfig:
+    """领域配置数据类
+
+    从 YAML 文件加载的领域特定配置，包含关键变量、
+    因果假设模板、解释重点方向和报告章节等信息。
+
+    Attributes:
+        name: 领域名称（如"定价策略"、"营销分析"）
+        description: 领域描述
+        key_variables: 关键变量列表
+        causal_templates: 因果假设模板列表
+        explanation_focus: 解释重点关注方向列表
+        report_sections: 报告章节列表
+    """
+
+    name: str = ""
+    description: str = ""
+    key_variables: list[str] = field(default_factory=list)
+    causal_templates: list[CausalTemplate] = field(default_factory=list)
+    explanation_focus: list[str] = field(default_factory=list)
+    report_sections: list[str] = field(default_factory=list)
+
+
+# ============================================================
 # 数据元信息
 # ============================================================
 
@@ -43,6 +90,7 @@ class DataMetadata:
         time_range: 时间范围（可选），格式如 ("2020-01-01", "2023-12-31")
         missing_ratio: 整体缺失比例，取值 [0, 1]
         domain: 业务领域描述，如 "金融"、"电商" 等
+        domain_config: 领域配置对象（可选），从 YAML 加载
     """
 
     columns: list[ColumnMeta] = field(default_factory=list)
@@ -50,6 +98,7 @@ class DataMetadata:
     time_range: tuple[str, str] | None = None
     missing_ratio: float = 0.0
     domain: str = ""
+    domain_config: DomainConfig | None = None
 
 
 # ============================================================
@@ -282,7 +331,9 @@ class CausalEffect:
         effect_size: 平均处理效应 (ATE)
         confidence_interval: 置信区间，如 (lower, upper)
         p_value: p 值
-        method: 估计方法
+        method: 估计方法，如 "dowhy.backdoor.linear_regression" 或 "ols"
+        refutation_results: DoWhy 反驳测试结果（可选）
+        identified: 是否通过 DoWhy 识别成功
     """
 
     treatment: str
@@ -291,6 +342,8 @@ class CausalEffect:
     confidence_interval: tuple[float, float] | None = None
     p_value: float | None = None
     method: str = ""
+    refutation_results: dict | None = None
+    identified: bool = True
 
 
 @dataclass

@@ -1152,9 +1152,12 @@ class ReportGenerator:
         """构建因果链分析章节
 
         根据受众类型调整展示风格：
-        - business/executive：用"X 影响 Y"的自然语言
-        - analyst/both：适中细节
-        - technical：保留完整统计（ATE、p值、置信区间）
+        - business/executive：用"X 影响 Y"的自然语言，DoWhy 结果标注"经过验证"
+        - analyst/both：适中细节，标注 DoWhy 框架
+        - technical：保留完整统计（ATE、p值、置信区间、反驳测试细节）
+
+        如果因果效应的 method 包含 "dowhy"，标注"因果推断（DoWhy 框架）"；
+        如果有 refutation_results，添加反驳测试结果段落。
 
         Args:
             causal: 因果分析结果
@@ -1166,9 +1169,15 @@ class ReportGenerator:
         lines: list[str] = ["## 因果链分析"]
         is_business = audience in ("executive", "business")
 
+        # 判断是否使用了 DoWhy
+        uses_dowhy = any(
+            "dowhy" in (e.method or "") for e in causal.causal_effects
+        )
+
         # 因果图
         if causal.causal_graph and causal.causal_graph.edges:
-            lines.append(f"\n### 因果假设图（方法: {causal.causal_graph.method}）")
+            method_tag = "（DoWhy 框架）" if uses_dowhy else ""
+            lines.append(f"\n### 因果假设图（方法: {causal.causal_graph.method}{method_tag}）")
             for edge in causal.causal_graph.edges:
                 if is_business:
                     direction = "推动" if edge.effect_size > 0 else "抑制"
@@ -1183,25 +1192,76 @@ class ReportGenerator:
 
         # 因果效应
         if causal.causal_effects:
-            lines.append("\n### 因果效应估计")
+            effect_label = "因果效应估计（DoWhy 框架）" if uses_dowhy else "因果效应估计"
+            lines.append(f"\n### {effect_label}")
             for eff in causal.causal_effects:
                 if is_business:
+                    # 业务版：根据反驳测试结果标注验证状态
+                    verification = ""
+                    if eff.refutation_results:
+                        all_passed = all(
+                            r.get("passed") is True
+                            for r in eff.refutation_results.values()
+                            if isinstance(r, dict)
+                        )
+                        verification = "（经过验证）" if all_passed else "（未通过验证）"
+                    elif eff.method and "dowhy" in eff.method:
+                        verification = "（经过验证）"
+
                     if eff.effect_size > 0:
                         lines.append(
-                            f"- 「{eff.treatment}」的提升会带动「{eff.outcome}」的增长"
+                            f"- 「{eff.treatment}」的提升会带动「{eff.outcome}」的增长{verification}"
                         )
                     else:
                         lines.append(
-                            f"- 「{eff.treatment}」的升高会拖累「{eff.outcome}」的表现"
+                            f"- 「{eff.treatment}」的升高会拖累「{eff.outcome}」的表现{verification}"
                         )
                 else:
                     ci_str = ""
                     if eff.confidence_interval:
                         ci_str = f", 95%CI=[{eff.confidence_interval[0]}, {eff.confidence_interval[1]}]"
+                    method_tag = f", 方法={eff.method}" if eff.method else ""
                     lines.append(
                         f"- {eff.treatment} -> {eff.outcome}: "
-                        f"ATE={eff.effect_size}, p={eff.p_value}{ci_str}"
+                        f"ATE={eff.effect_size}, p={eff.p_value}{ci_str}{method_tag}"
                     )
+
+        # 反驳测试结果（技术版/分析师版展示细节，业务版只展示验证状态）
+        if uses_dowhy:
+            has_refutation = any(e.refutation_results for e in causal.causal_effects)
+            if has_refutation:
+                if is_business:
+                    # 业务版：汇总验证状态
+                    lines.append("\n### 因果推断验证")
+                    verified_count = 0
+                    total_count = 0
+                    for eff in causal.causal_effects:
+                        if eff.refutation_results:
+                            total_count += 1
+                            all_passed = all(
+                                r.get("passed") is True
+                                for r in eff.refutation_results.values()
+                                if isinstance(r, dict)
+                            )
+                            if all_passed:
+                                verified_count += 1
+                    if total_count > 0:
+                        lines.append(
+                            f"共 {total_count} 项因果推断通过了反驳测试验证，"
+                            f"其中 {verified_count} 项完全通过。"
+                        )
+                else:
+                    # 技术版/分析师版：展示具体反驳测试细节
+                    lines.append("\n### 反驳测试结果")
+                    for eff in causal.causal_effects:
+                        if eff.refutation_results:
+                            lines.append(f"\n**{eff.treatment} -> {eff.outcome}**:")
+                            for test_name, test_result in eff.refutation_results.items():
+                                if isinstance(test_result, dict):
+                                    passed = test_result.get("passed")
+                                    details = test_result.get("details", "")
+                                    status = "通过" if passed else ("未通过" if passed is False else "未知")
+                                    lines.append(f"- {test_name}: {status} — {details}")
 
         # 反事实分析
         if causal.counterfactuals:
@@ -1382,7 +1442,17 @@ class ReportGenerator:
             lines.append("\n### 因果分析")
             if causal.causal_graph:
                 lines.append(f"- 因果图发现：{causal.causal_graph.method}")
-            lines.append("- 因果效应估计：OLS 线性回归 + 控制变量")
+            # 根据因果效应的方法判断使用了哪种估计方式
+            uses_dowhy = any(
+                "dowhy" in (e.method or "") for e in causal.causal_effects
+            )
+            if uses_dowhy:
+                lines.append("- 因果效应估计：DoWhy 框架（建模-识别-估计-反驳四步法）")
+                lines.append("  - 识别方法：backdoor 准则")
+                lines.append("  - 估计方法：backdoor.linear_regression")
+                lines.append("  - 反驳测试：安慰剂检验（placebo_treatment_refuter）、随机共同原因（random_common_cause）")
+            else:
+                lines.append("- 因果效应估计：OLS 线性回归 + 控制变量")
             lines.append("- 反事实推理：基于因果效应的线性模拟")
 
         if pred:

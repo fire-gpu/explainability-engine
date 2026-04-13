@@ -76,6 +76,7 @@ class PredictiveSimulator:
         target = analysis_input.config.target_variable
         domain = analysis_input.metadata.domain
         audience = analysis_input.config.audience
+        domain_config = analysis_input.metadata.domain_config
 
         logger.info("开始预测模拟")
 
@@ -91,8 +92,8 @@ class PredictiveSimulator:
             )
             logger.info("从描述性分析推导了 %d 个伪因果效应", len(causal_effects))
 
-        # 1. 生成情景模拟
-        scenarios = self._generate_scenarios(df, causal_effects, target)
+        # 1. 生成情景模拟（优先对领域关键变量做模拟）
+        scenarios = self._generate_scenarios(df, causal_effects, target, domain_config)
         logger.info("情景模拟完成，共 %d 个场景", len(scenarios))
 
         # 2. 敏感性分析
@@ -114,6 +115,7 @@ class PredictiveSimulator:
             domain=domain,
             audience=audience,
             business_understanding=analysis_input.business_understanding,
+            domain_config=domain_config,
         )
         logger.info("预测叙述生成完成")
 
@@ -201,6 +203,7 @@ class PredictiveSimulator:
         df: pd.DataFrame,
         causal_effects: list[CausalEffect],
         target: str | None,
+        domain_config: object | None = None,
     ) -> list[Scenario]:
         """生成情景模拟
 
@@ -209,10 +212,14 @@ class PredictiveSimulator:
         - 中性：维持现状
         - 悲观：所有负面因素 -10%
 
+        如果提供了领域配置且包含 key_variables，会优先对
+        领域关键变量做情景模拟，确保业务最关注的变量被覆盖。
+
         Args:
             df: 数据框
             causal_effects: 因果效应列表
             target: 目标变量名
+            domain_config: 领域配置对象（可选）
 
         Returns:
             list[Scenario]: 模拟场景列表
@@ -231,11 +238,26 @@ class PredictiveSimulator:
             )
             return scenarios
 
+        # 如果有领域配置，优先筛选关键变量的因果效应
+        effective_effects = causal_effects
+        if domain_config is not None and hasattr(domain_config, "key_variables"):
+            key_vars = set(domain_config.key_variables) if domain_config.key_variables else set()
+            if key_vars:
+                # 将关键变量的效应排在前面
+                key_effects = [e for e in causal_effects if e.treatment in key_vars]
+                other_effects = [e for e in causal_effects if e.treatment not in key_vars]
+                if key_effects:
+                    effective_effects = key_effects + other_effects
+                    logger.info(
+                        "情景模拟优先处理 %d 个领域关键变量",
+                        len(key_effects),
+                    )
+
         baseline = float(df[target].mean())
 
         # 区分正面和负面因素
-        positive_effects = [e for e in causal_effects if e.effect_size > 0]
-        negative_effects = [e for e in causal_effects if e.effect_size < 0]
+        positive_effects = [e for e in effective_effects if e.effect_size > 0]
+        negative_effects = [e for e in effective_effects if e.effect_size < 0]
 
         # 乐观场景：正面因素 +10%，负面因素 -10%
         optimistic_change = 0.0
@@ -457,11 +479,15 @@ class PredictiveSimulator:
         domain: str,
         audience: str,
         business_understanding: object | None = None,
+        domain_config: object | None = None,
     ) -> str:
         """生成预测解释叙述
 
         如果配置了 LLM 客户端，调用 LLM 生成叙述；
         否则使用模板拼接生成结构化文字描述。
+
+        如果提供了领域配置且包含 explanation_focus，
+        会将其传入 prompt，引导 LLM 重点关注这些方向。
 
         Args:
             scenarios: 模拟场景列表
@@ -470,6 +496,7 @@ class PredictiveSimulator:
             domain: 业务领域
             audience: 目标受众
             business_understanding: L1 数据预扫描的业务理解结果（可选）
+            domain_config: 领域配置对象（可选）
 
         Returns:
             str: 自然语言预测解释文本
@@ -483,6 +510,11 @@ class PredictiveSimulator:
             data_summary += f"，分析了 {len(sensitivity.entries)} 个变量的敏感性"
         data_summary += f"，执行了 {len(what_ifs)} 个 What-If 分析。"
 
+        # 提取领域配置中的解释重点方向
+        explanation_focus: list[str] = []
+        if domain_config is not None and hasattr(domain_config, "explanation_focus"):
+            explanation_focus = domain_config.explanation_focus or []
+
         if self.llm is not None:
             try:
                 from llm.prompts import PromptTemplates
@@ -493,6 +525,7 @@ class PredictiveSimulator:
                     domain=domain or "通用",
                     audience=audience,
                     business_understanding=business_understanding,  # type: ignore[arg-type]
+                    explanation_focus=explanation_focus if explanation_focus else None,
                 )
                 narrative = self.llm.generate(
                     prompt=prompt,

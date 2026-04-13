@@ -2,16 +2,20 @@
 文件解析器模块
 
 支持 CSV / JSON / Excel 格式的文件解析，自动推断列类型并提取数据元信息。
+支持从领域配置 YAML 加载领域特定配置，注入到分析流程中。
 """
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
 import pandas as pd
 
 from core.models import AnalysisConfig, AnalysisInput, ColumnMeta, DataMetadata
+
+logger = logging.getLogger(__name__)
 
 
 class FileParser:
@@ -31,6 +35,12 @@ class FileParser:
 
     def parse(self, file_path: str, config: AnalysisConfig | None = None) -> AnalysisInput:
         """解析文件，返回 AnalysisInput
+
+        解析流程：
+        1. 根据文件扩展名选择解析方式
+        2. 推断列类型并提取元信息
+        3. 根据配置中的 domain 字段加载领域配置
+        4. 将领域配置注入到 DataMetadata 中
 
         Args:
             file_path: 文件路径，支持 CSV / JSON / Excel 格式
@@ -59,13 +69,20 @@ class FileParser:
         # 推断列类型
         columns = self._detect_column_types(df)
 
-        # 提取元信息
-        domain = "generic"
-        metadata = self._extract_metadata(df, columns, domain)
-
         # 使用传入配置或默认配置
         if config is None:
             config = AnalysisConfig()
+
+        # 确定领域标识符：优先使用环境变量，其次使用配置中的 domain
+        domain = os.environ.get("DEFAULT_DOMAIN", "") or "generic"
+        if config and hasattr(config, "domain") and config.domain:
+            domain = config.domain
+
+        # 加载领域配置
+        domain_config = self._load_domain_config(domain)
+
+        # 提取元信息（包含领域配置）
+        metadata = self._extract_metadata(df, columns, domain, domain_config)
 
         return AnalysisInput(data=df, metadata=metadata, config=config)
 
@@ -156,16 +173,21 @@ class FileParser:
             return False
 
     def _extract_metadata(
-        self, df: pd.DataFrame, columns: list[ColumnMeta], domain: str
+        self,
+        df: pd.DataFrame,
+        columns: list[ColumnMeta],
+        domain: str,
+        domain_config: object | None = None,
     ) -> DataMetadata:
         """提取数据元信息
 
-        包括行数、缺失值比例和时间范围。
+        包括行数、缺失值比例、时间范围和领域配置。
 
         Args:
             df: 数据框
             columns: 列元信息列表
             domain: 业务领域描述
+            domain_config: 领域配置对象（可选）
 
         Returns:
             DataMetadata: 数据集元信息
@@ -186,7 +208,31 @@ class FileParser:
             time_range=time_range,
             missing_ratio=round(missing_ratio, 4),
             domain=domain,
+            domain_config=domain_config,  # type: ignore[arg-type]
         )
+
+    def _load_domain_config(self, domain: str) -> object | None:
+        """加载领域配置
+
+        使用 DomainLoader 从 YAML 文件加载指定领域的配置。
+        加载失败时返回 None，不影响主流程。
+
+        Args:
+            domain: 领域标识符
+
+        Returns:
+            DomainConfig | None: 领域配置对象，加载失败时返回 None
+        """
+        try:
+            from config.domain_loader import DomainLoader
+
+            loader = DomainLoader()
+            config = loader.load(domain)
+            logger.info("已加载领域配置: %s（%s）", domain, config.name)
+            return config
+        except Exception as e:
+            logger.warning("领域配置加载失败，使用默认配置: %s", e)
+            return None
 
     def _detect_time_range(
         self, df: pd.DataFrame, columns: list[ColumnMeta]

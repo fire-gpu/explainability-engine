@@ -144,6 +144,7 @@ class PromptTemplates:
         domain: str,
         audience: str,
         business_understanding: BusinessUnderstanding | None = None,
+        explanation_focus: list[str] | None = None,
     ) -> str:
         """生成描述性分析的 prompt
 
@@ -151,12 +152,14 @@ class PromptTemplates:
         - 业务受众：不出现 p 值、置信区间等技术术语，用"影响很大/较小"、"关系密切"等业务语言
         - 技术受众：保留所有统计细节
         - 有 business_understanding 时，注入业务场景和关键指标信息
+        - 有 explanation_focus 时，明确要求 LLM 重点关注这些方向
 
         Args:
             data_summary: 数据概要信息（统计量、分布等）
             domain: 业务领域描述
             audience: 目标受众（executive / analyst / technical）
             business_understanding: L1 数据预扫描的业务理解结果（可选）
+            explanation_focus: 解释重点关注方向列表（可选）
 
         Returns:
             str: 完整的用户提示词
@@ -211,6 +214,11 @@ class PromptTemplates:
         parts.append(f"\n## 受众要求\n{guide}")
         parts.append(f"\n## 数据概要\n{data_summary}")
 
+        # 注入领域解释重点方向
+        if explanation_focus:
+            focus_str = "、".join(explanation_focus)
+            parts.append(f"\n## 重点关注方向\n请特别关注以下分析方向：{focus_str}")
+
         parts.append("\n## 输出要求")
         if business_understanding and business_understanding.business_question_answer:
             # 有业务问题时，围绕回答问题组织分析
@@ -242,6 +250,7 @@ class PromptTemplates:
         domain: str,
         audience: str,
         business_understanding: BusinessUnderstanding | None = None,
+        explanation_focus: list[str] | None = None,
     ) -> str:
         """生成因果解释的 prompt
 
@@ -249,6 +258,7 @@ class PromptTemplates:
         - 业务受众：用"影响很大/较小"替代效应大小和 p 值
         - 技术受众：保留完整的统计检验细节
         - 有 business_understanding 时，注入因果假设和业务场景
+        - 有 explanation_focus 时，明确要求 LLM 重点关注这些方向
 
         Args:
             data_summary: 数据概要信息
@@ -256,6 +266,7 @@ class PromptTemplates:
             domain: 业务领域描述
             audience: 目标受众
             business_understanding: L1 数据预扫描的业务理解结果（可选）
+            explanation_focus: 解释重点关注方向列表（可选）
 
         Returns:
             str: 完整的用户提示词
@@ -310,6 +321,11 @@ class PromptTemplates:
         parts.append(f"\n## 数据概要\n{data_summary}")
         parts.append(f"\n## 因果分析结果\n{causal_findings}")
 
+        # 注入领域解释重点方向
+        if explanation_focus:
+            focus_str = "、".join(explanation_focus)
+            parts.append(f"\n## 重点关注方向\n请特别关注以下因果分析方向：{focus_str}")
+
         parts.append("\n## 输出要求")
         if business_understanding and business_understanding.business_question_answer:
             parts.append(
@@ -339,6 +355,7 @@ class PromptTemplates:
         domain: str,
         audience: str,
         business_understanding: BusinessUnderstanding | None = None,
+        explanation_focus: list[str] | None = None,
     ) -> str:
         """生成预测解释的 prompt
 
@@ -346,6 +363,7 @@ class PromptTemplates:
         - 业务受众：用"可能增长/下降"替代具体数值和置信区间
         - 技术受众：保留完整的模型细节
         - 有 business_understanding 时，注入关键指标和业务场景
+        - 有 explanation_focus 时，明确要求 LLM 重点关注这些方向
 
         Args:
             data_summary: 数据概要信息
@@ -353,6 +371,7 @@ class PromptTemplates:
             domain: 业务领域描述
             audience: 目标受众
             business_understanding: L1 数据预扫描的业务理解结果（可选）
+            explanation_focus: 解释重点关注方向列表（可选）
 
         Returns:
             str: 完整的用户提示词
@@ -406,6 +425,11 @@ class PromptTemplates:
         parts.append(f"\n## 受众要求\n{guide}")
         parts.append(f"\n## 数据概要\n{data_summary}")
         parts.append(f"\n## 场景模拟结果\n{scenarios}")
+
+        # 注入领域解释重点方向
+        if explanation_focus:
+            focus_str = "、".join(explanation_focus)
+            parts.append(f"\n## 重点关注方向\n请特别关注以下预测分析方向：{focus_str}")
 
         parts.append("\n## 输出要求")
         if business_understanding and business_understanding.business_question_answer:
